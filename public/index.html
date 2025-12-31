@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>City Complaint System</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+    h1 { text-align: center; color: #2c3e50; }
+    textarea { width: 100%; height: 150px; padding: 10px; font-size: 16px; }
+    button { padding: 12px 24px; font-size: 18px; background: #3498db; color: white; border: none; cursor: pointer; margin-top: 20px; }
+    button:hover { background: #2980b9; }
+  </style>
+</head>
+<body>
+  <h1>City Complaint Portal</h1>
+  <p>Report issues with waste, roads, streetlights, or water supply.</p>
+  <form action="/submit-complaint" method="POST">
+    <textarea name="complaint" placeholder="Describe the issue and location... (e.g., Big pothole on Main Road near school)" required></textarea><br>
+    <button type="submit">Submit Complaint</button>
+  </form>
+</body>
+</html>
