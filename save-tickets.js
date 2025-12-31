@@ -79,8 +79,8 @@ Message: "${message}"`;
 console.log("Saving test tickets...\n");
 
 classifyAndSave("Big pothole on Main Road near the school, very dangerous!");
-classifyAndSave("Garbage not collected for 5 days in Sector 9");
-classifyAndSave("Streetlight not working outside house 123, Park Avenue");
-classifyAndSave("No water supply since morning in Green Valley");
+//classifyAndSave("Garbage not collected for 5 days in Sector 9");
+//classifyAndSave("Streetlight not working outside house 123, Park Avenue");
+//classifyAndSave("No water supply since morning in Green Valley");
 
 console.log("Done! Check your Supabase dashboard → Table Editor → tickets");
