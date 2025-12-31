@@ -3,21 +3,87 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>City Complaint System</title>
+  <title>City Complaint Portal</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-    h1 { text-align: center; color: #2c3e50; }
-    textarea { width: 100%; height: 150px; padding: 10px; font-size: 16px; }
-    button { padding: 12px 24px; font-size: 18px; background: #3498db; color: white; border: none; cursor: pointer; margin-top: 20px; }
-    button:hover { background: #2980b9; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Poppins', sans-serif; background: #f0f4f8; color: #333; }
+    header {
+      background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)), url('https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?ixlib=rb-4.0.3&auto=format&fit=crop&w=1500&q=80');
+      background-size: cover;
+      background-position: center;
+      color: white;
+      text-align: center;
+      padding: 100px 20px;
+    }
+    header h1 { font-size: 3.5em; margin-bottom: 10px; }
+    header p { font-size: 1.4em; max-width: 800px; margin: 0 auto; }
+    .container { max-width: 800px; margin: 40px auto; padding: 20px; background: white; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+    .login-section { text-align: right; margin-bottom: 20px; }
+    .login-btn { background: #3498db; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; }
+    .login-btn:hover { background: #2980b9; }
+    h2 { text-align: center; color: #2c3e50; margin-bottom: 20px; }
+    textarea { width: 100%; height: 180px; padding: 15px; font-size: 16px; border: 1px solid #ddd; border-radius: 10px; resize: vertical; }
+    button.submit { width: 100%; padding: 15px; font-size: 1.2em; background: #27ae60; color: white; border: none; border-radius: 10px; cursor: pointer; margin-top: 20px; }
+    button.submit:hover { background: #219a52; }
+    .features { display: flex; justify-content: space-around; margin: 40px 0; text-align: center; }
+    .feature { flex: 1; padding: 20px; }
+    .feature i { font-size: 3em; color: #3498db; margin-bottom: 10px; }
   </style>
 </head>
 <body>
-  <h1>City Complaint Portal</h1>
-  <p>Report issues with waste, roads, streetlights, or water supply.</p>
-  <form action="/submit-complaint" method="POST">
-    <textarea name="complaint" placeholder="Describe the issue and location... (e.g., Big pothole on Main Road near school)" required></textarea><br>
-    <button type="submit">Submit Complaint</button>
-  </form>
+  <header>
+    <h1>City Complaint Portal</h1>
+    <p>Report issues with waste, roads, streetlights, or water supply — We listen and act!</p>
+  </header>
+
+  <div class="container">
+    <div class="login-section">
+      <button class="login-btn" onclick="document.getElementById('loginModal').style.display='block'">Department Login</button>
+    </div>
+
+    <h2>Submit a New Complaint</h2>
+    <form action="/submit-complaint" method="POST" enctype="multipart/form-data">
+      <textarea name="complaint" placeholder="Describe the issue and location... (e.g., Big pothole on Main Road near school, very dangerous!)" required></textarea>
+      <div style="margin-top:20px; text-align:center;">
+        <label for="photo" style="font-size:1.1em; color:#555;">Attach Photo (optional):</label><br>
+        <input type="file" id="photo" name="photo" accept="image/*" style="margin-top:10px;">
+      </div>
+      <button type="submit" class="submit">Submit Complaint</button>
+    </form>
+
+    <div class="features">
+      <div class="feature">
+        <i class="fas fa-bolt"></i>
+        <h3>Fast Response</h3>
+        <p>AI routes your issue instantly</p>
+      </div>
+      <div class="feature">
+        <i class="fas fa-map-marker-alt"></i>
+        <h3>Track Location</h3>
+        <p>Precise area identification</p>
+      </div>
+      <div class="feature">
+        <i class="fas fa-ticket-alt"></i>
+        <h3>Get Ticket ID</h3>
+        <p>Track status anytime</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simple Login Modal -->
+  <div id="loginModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); justify-content:center; align-items:center;">
+    <div style="background:white; padding:30px; border-radius:15px; width:300px; text-align:center;">
+      <h2>Department Login</h2>
+      <form action="/login" method="POST">
+        <input type="text" name="username" placeholder="Username" required style="width:100%; padding:10px; margin:10px 0; border-radius:5px; border:1px solid #ddd;"><br>
+        <input type="password" name="password" placeholder="Password" required style="width:100%; padding:10px; margin:10px 0; border-radius:5px; border:1px solid #ddd;"><br>
+        <button type="submit" style="background:#3498db; color:white; padding:10px 20px; border:none; border-radius:5px;">Login</button>
+      </form>
+      <button onclick="document.getElementById('loginModal').style.display='none'" style="margin-top:10px; background:#e74c3c; color:white; padding:10px 20px; border:none; border-radius:5px;">Close</button>
+      <p style="margin-top:10px; color:gray;">Demo: admin / city123</p>
+    </div>
+  </div>
 </body>
 </html>
