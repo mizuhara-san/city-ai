@@ -1,10 +1,9 @@
 require('dotenv').config();
 const express = require('express');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
 const multer = require('multer');
-const { processComplaint } = require('./agents'); // AI Agent
-
-const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = 3000;
@@ -13,10 +12,14 @@ const PORT = 3000;
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// Multer for photo upload (memory storage)
+// Multer for photo upload
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Supabase client
+// Initialize Gemini (use current stable model that supports vision)
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+// Initialize Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
@@ -27,37 +30,118 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Submit complaint - uses AI Agent
+// Submit complaint with AI agent + photo analysis
 app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
-  const message = req.body.complaint;
+  let message = req.body.complaint;
   let photoBase64 = null;
   let photoDataUrl = null;
+  let photoAnalysis = '';
+  let agentThinking = [];
 
   if (!message || message.trim() === "") {
     return res.send("<h2>Please enter a complaint!</h2><a href='/'>Go back</a>");
   }
 
-  // Handle optional photo
+  agentThinking.push("🤖 AI Agent activated...");
+  agentThinking.push("📝 Reading complaint: " + message.substring(0, 100) + "...");
+
+  // Optional photo upload + AI analysis
   if (req.file) {
     photoBase64 = req.file.buffer.toString('base64');
     photoDataUrl = `data:${req.file.mimetype};base64,${photoBase64}`;
+
+    try {
+      agentThinking.push("📸 Analyzing uploaded photo with Gemini Vision...");
+
+      const imagePart = {
+        inlineData: {
+          data: photoBase64,
+          mimeType: req.file.mimetype
+        }
+      };
+
+      const analysisPrompt = "Analyze this image for a city complaint. Provide a clear, concise description in 40-50 words only. Focus on the visible problem, size, condition, and safety risk. No extra commentary.";
+
+      const analysisResult = await model.generateContent([analysisPrompt, imagePart]);
+      const analysisResponse = await analysisResult.response;
+      photoAnalysis = analysisResponse.text().trim();
+
+      // Enforce word limit
+      const words = photoAnalysis.split(' ');
+      if (words.length > 50) {
+        photoAnalysis = words.slice(0, 50).join(' ') + '...';
+      }
+
+      agentThinking.push("✅ Photo analysis complete (40-50 words)");
+
+      message = `${message}\n\nAI Photo Analysis: ${photoAnalysis}`;
+    } catch (analysisErr) {
+      console.error("Photo analysis error:", analysisErr);
+      photoAnalysis = 'AI photo analysis unavailable';
+      agentThinking.push("⚠️ Photo analysis failed");
+    }
   }
 
   try {
-    // Call AI Agent
-    const agentResult = await processComplaint(message);
+    agentThinking.push("🧠 Classifying complaint with Gemini AI...");
 
-    // If photo uploaded and ticket created successfully, save photo
-    if (photoBase64 && agentResult.ticket_id && agentResult.ticket_id !== "ERROR") {
-      const { error: photoError } = await supabase
-        .from('tickets')
-        .update({ photo_base64: photoBase64 })
-        .eq('ticket_id', agentResult.ticket_id);
+    const prompt = `You are an intelligent AI agent for city complaints.
+Think step by step and respond in this JSON format only:
 
-      if (photoError) console.error("Photo save error:", photoError);
+{
+  "thinking": ["step 1", "step 2", "step 3"],
+  "category": "Waste Management" or "Roads & Potholes" or "Streetlights" or "Water Supply" or "Animal Deaths" or "Accidents" or "Road Blockage",
+  "location": "extracted location",
+  "priority": "Low", "Medium", or "High",
+  "summary": "short summary"
+}
+
+Complaint: "${message}"`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+
+    let classified;
+    try {
+      classified = JSON.parse(text);
+      agentThinking = agentThinking.concat(classified.thinking || ["Analysis complete"]);
+    } catch (e) {
+      agentThinking.push("⚠️ AI response unclear, using safe defaults");
+      classified = {
+        category: "Roads & Potholes",
+        location: "No location mentioned",
+        priority: "Medium",
+        summary: message.substring(0, 100),
+        thinking: ["Used fallback classification"]
+      };
     }
 
-    // Success page with AI agent thinking trace
+    agentThinking.push("💾 Saving to database...");
+
+    const { data: insertedData, error: insertError } = await supabase
+      .from('tickets')
+      .insert({
+        citizen_message: message,
+        category: classified.category,
+        location: classified.location,
+        priority: classified.priority,
+        status: 'Open',
+        photo_base64: photoBase64,
+        photo_analysis: photoAnalysis
+      })
+      .select();
+
+    if (insertError) throw insertError;
+
+    const { count } = await supabase.from('tickets').select('id', { count: 'exact', head: true });
+    const ticket_id = `TKT-${String(count || 1).padStart(4, '0')}`;
+
+    await supabase.from('tickets').update({ ticket_id }).eq('id', insertedData[0].id);
+
+    agentThinking.push(`✅ Ticket created: ${ticket_id}`);
+
+    // Success page with AI agent thinking
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -71,7 +155,7 @@ app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
           .card { max-width: 800px; margin: 0 auto; background: white; border-radius: 15px; padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
           h1 { color: #27ae60; text-align: center; }
           .agent-trace { background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }
-          .step { margin: 8px 0; padding: 12px; background: #e9ecef; border-left: 5px solid #3498db; border-radius: 8px; font-family: monospace; }
+          .step { margin: 8px 0; padding: 12px; background: #e9ecef; border-left: 5px solid #3498db; border-radius: 8px; }
           .photo { max-width: 100%; max-height: 400px; border-radius: 10px; margin: 20px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
           a { display: block; text-align: center; margin-top: 30px; padding: 12px 24px; background: #3498db; color: white; text-decoration: none; border-radius: 8px; width: fit-content; margin-left: auto; margin-right: auto; }
           a:hover { background: #2980b9; }
@@ -80,20 +164,24 @@ app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
       <body>
         <div class="card">
           <h1>🎉 Complaint Registered Successfully!</h1>
-          <p><strong>Ticket ID:</strong> ${agentResult.ticket_id || "Processing..."}</p>
-          <p><strong>Category:</strong> ${agentResult.category}</p>
-          <p><strong>Location:</strong> ${agentResult.location}</p>
-          <p><strong>Priority:</strong> ${agentResult.priority}</p>
-          ${agentResult.summary ? `<p><strong>Summary:</strong> ${agentResult.summary}</p>` : ''}
+          <p><strong>Ticket ID:</strong> ${ticket_id}</p>
+          <p><strong>Category:</strong> ${classified.category}</p>
+          <p><strong>Location:</strong> ${classified.location}</p>
+          <p><strong>Priority:</strong> ${classified.priority}</p>
+          <p><strong>Summary:</strong> ${classified.summary}</p>
 
-          ${photoDataUrl ? `<img src="${photoDataUrl}" alt="Evidence" class="photo">` : '<p><em>No photo attached (optional)</em></p>'}
+          ${photoDataUrl ? `<img src="${photoDataUrl}" alt="Evidence" class="photo">` : '<p><em>No photo attached</em></p>'}
 
-          ${agentResult.agent_thinking ? `
-          <div class="agent-trace">
-            <h3>🤖 AI Agent Thinking Process</h3>
-            ${agentResult.agent_thinking.map(step => `<div class="step">${step}</div>`).join('')}
+          ${photoAnalysis ? `
+          <div style="background:#e8f5e8; padding:15px; border-radius:10px; margin:20px 0;">
+            <strong>AI Photo Analysis (40-50 words):</strong><br>${photoAnalysis}
           </div>
           ` : ''}
+
+          <div class="agent-trace">
+            <h3>🤖 AI Agent Thinking Process</h3>
+            ${agentThinking.map(step => `<div class="step">${step}</div>`).join('')}
+          </div>
 
           <a href="/">Submit Another Complaint</a>
         </div>
@@ -102,11 +190,11 @@ app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
     `);
 
   } catch (err) {
-    console.error("Agent integration error:", err);
+    console.error("Full error:", err);
     res.send(`
-      <h2 style="color:red; text-align:center;">Agent Error</h2>
-      <p>Please try again later.</p>
-      <a href="/">Back to Home</a>
+      <h2 style="color:red;">Error Processing Complaint</h2>
+      <p>Details: ${err.message}</p>
+      <a href="/">Try Again</a>
     `);
   }
 });
@@ -133,7 +221,7 @@ app.post('/login', (req, res) => {
   }
 });
 
-// Real Dashboard - shows all tickets
+// Dashboard - shows all tickets
 app.get('/dashboard', async (req, res) => {
   try {
     const { data: tickets, error } = await supabase
@@ -145,22 +233,27 @@ app.get('/dashboard', async (req, res) => {
 
     let ticketList = '';
     if (tickets.length === 0) {
-      ticketList = '<p style="text-align:center; color:gray; font-size:1.2em;">No complaints submitted yet.</p>';
+      ticketList = '<p style="text-align:center; color:gray;">No complaints yet.</p>';
     } else {
       tickets.forEach(ticket => {
         const photoHtml = ticket.photo_base64 
-          ? `<img src="data:image/jpeg;base64,${ticket.photo_base64}" style="max-width:100%; max-height:400px; border-radius:10px; margin-top:15px; box-shadow:0 4px 10px rgba(0,0,0,0.1);" alt="Complaint photo">`
-          : '<p style="color:gray; font-style:italic;">No photo attached</p>';
+          ? `<img src="data:image/jpeg;base64,${ticket.photo_base64}" style="max-width:100%; border-radius:10px; margin-top:10px;" alt="Photo">`
+          : '<p><em>No photo</em></p>';
+
+        const analysisHtml = ticket.photo_analysis 
+          ? `<div style="background:#e8f5e8; padding:10px; border-radius:8px; margin-top:10px;"><strong>AI Photo Analysis:</strong> ${ticket.photo_analysis}</div>`
+          : '';
 
         ticketList += `
-          <div style="background:#f8f9fa; border-left:5px solid #3498db; border-radius:10px; padding:20px; margin-bottom:25px; box-shadow:0 4px 15px rgba(0,0,0,0.05);">
-            <h3 style="color:#2c3e50; margin-bottom:10px;">Ticket ID: ${ticket.ticket_id || 'Not assigned'}</h3>
-            <p><strong>Status:</strong> <span style="color:#e67e22; font-weight:bold;">${ticket.status}</span></p>
+          <div style="background:#f8f9fa; border-radius:10px; padding:20px; margin-bottom:20px; box-shadow:0 4px 10px rgba(0,0,0,0.1);">
+            <h3>Ticket ID: ${ticket.ticket_id || 'N/A'}</h3>
+            <p><strong>Status:</strong> ${ticket.status}</p>
             <p><strong>Category:</strong> ${ticket.category}</p>
             <p><strong>Location:</strong> ${ticket.location}</p>
             <p><strong>Priority:</strong> ${ticket.priority}</p>
             <p><strong>Submitted:</strong> ${new Date(ticket.created_at).toLocaleString()}</p>
             <p><strong>Description:</strong><br>${ticket.citizen_message.replace(/\n/g, '<br>')}</p>
+            ${analysisHtml}
             ${photoHtml}
           </div>
         `;
@@ -178,10 +271,9 @@ app.get('/dashboard', async (req, res) => {
         <style>
           body { font-family: 'Poppins', sans-serif; background: #f0f4f8; padding: 40px; }
           .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 15px; padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-          h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
-          .logout { text-align: right; margin-bottom: 30px; }
-          .logout a { background: #e74c3c; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; }
-          .tickets { margin-top: 20px; }
+          h1 { text-align: center; color: #2c3e50; }
+          .logout { text-align: right; margin-bottom: 20px; }
+          .logout a { background: #e74c3c; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; }
         </style>
       </head>
       <body>
@@ -190,12 +282,12 @@ app.get('/dashboard', async (req, res) => {
             <a href="/">Logout</a>
           </div>
           <h1>Department Dashboard</h1>
-          <p style="text-align:center; font-size:1.2em; color:#555;">All Citizen Complaints</p>
-          <div class="tickets">
+          <p style="text-align:center;">All Citizen Complaints</p>
+          <div style="margin-top:30px;">
             ${ticketList}
           </div>
           <div style="text-align:center; margin-top:40px;">
-            <a href="/" style="padding:12px 24px; background:#3498db; color:white; border-radius:8px; text-decoration:none;">Back to Home</a>
+            <a href="/">Back to Home</a>
           </div>
         </div>
       </body>
@@ -204,11 +296,7 @@ app.get('/dashboard', async (req, res) => {
 
   } catch (err) {
     console.error("Dashboard error:", err);
-    res.send(`
-      <h2 style="color:red; text-align:center;">Error Loading Dashboard</h2>
-      <p>Check server logs.</p>
-      <a href="/">Back</a>
-    `);
+    res.send(`<h2>Error</h2><a href="/">Back</a>`);
   }
 });
 
@@ -216,28 +304,18 @@ app.get('/dashboard', async (req, res) => {
 app.get('/api/ticket-status', async (req, res) => {
   const ticketId = req.query.ticketId;
 
-  if (!ticketId) {
-    return res.json({ error: "No ticket ID provided" });
-  }
+  if (!ticketId) return res.json({ error: "No ticket ID" });
 
-  try {
-    const { data, error } = await supabase
-      .from('tickets')
-      .select('*')
-      .eq('ticket_id', ticketId)
-      .single();
+  const { data, error } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('ticket_id', ticketId)
+    .single();
 
-    if (error || !data) {
-      res.json({ error: "Ticket not found" });
-    } else {
-      res.json(data);
-    }
-  } catch (err) {
-    res.json({ error: "Server error" });
-  }
+  if (error || !data) res.json({ error: "Not found" });
+  else res.json(data);
 });
 
 app.listen(PORT, () => {
-  console.log(`City AI Agent Portal is running!`);
-  console.log(`Open http://localhost:${PORT} in your browser`);
+  console.log(`City AI Portal running on http://localhost:${PORT}`);
 });
