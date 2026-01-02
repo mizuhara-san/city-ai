@@ -4,6 +4,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
 const multer = require('multer');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = 3000;
@@ -15,7 +16,7 @@ app.use(express.static('public'));
 // Multer for photo upload
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Initialize Gemini (use current stable model that supports vision)
+// Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
@@ -25,75 +26,44 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
+// Email transporter (for team notifications)
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
+
 // Home page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Submit complaint with AI agent + photo analysis
+// Submit complaint (same as before)
 app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
   let message = req.body.complaint;
   let photoBase64 = null;
   let photoDataUrl = null;
-  let photoAnalysis = '';
-  let agentThinking = [];
 
   if (!message || message.trim() === "") {
     return res.send("<h2>Please enter a complaint!</h2><a href='/'>Go back</a>");
   }
 
-  agentThinking.push("🤖 AI Agent activated...");
-  agentThinking.push("📝 Reading complaint: " + message.substring(0, 100) + "...");
-
-  // Optional photo upload + AI analysis
   if (req.file) {
     photoBase64 = req.file.buffer.toString('base64');
     photoDataUrl = `data:${req.file.mimetype};base64,${photoBase64}`;
-
-    try {
-      agentThinking.push("📸 Analyzing uploaded photo with Gemini Vision...");
-
-      const imagePart = {
-        inlineData: {
-          data: photoBase64,
-          mimeType: req.file.mimetype
-        }
-      };
-
-      const analysisPrompt = "Analyze this image for a city complaint. Provide a clear, concise description in 40-50 words only. Focus on the visible problem, size, condition, and safety risk. No extra commentary.";
-
-      const analysisResult = await model.generateContent([analysisPrompt, imagePart]);
-      const analysisResponse = await analysisResult.response;
-      photoAnalysis = analysisResponse.text().trim();
-
-      // Enforce word limit
-      const words = photoAnalysis.split(' ');
-      if (words.length > 50) {
-        photoAnalysis = words.slice(0, 50).join(' ') + '...';
-      }
-
-      agentThinking.push("✅ Photo analysis complete (40-50 words)");
-
-      message = `${message}\n\nAI Photo Analysis: ${photoAnalysis}`;
-    } catch (analysisErr) {
-      console.error("Photo analysis error:", analysisErr);
-      photoAnalysis = 'AI photo analysis unavailable';
-      agentThinking.push("⚠️ Photo analysis failed");
-    }
   }
 
   try {
-    agentThinking.push("🧠 Classifying complaint with Gemini AI...");
+    const prompt = `Classify this citizen complaint and return ONLY valid JSON:
 
-    const prompt = `You are an intelligent AI agent for city complaints.
-Think step by step and respond in this JSON format only:
+Categories: "Waste Management", "Roads & Potholes", "Streetlights", "Water Supply"
 
 {
-  "thinking": ["step 1", "step 2", "step 3"],
-  "category": "Waste Management" or "Roads & Potholes" or "Streetlights" or "Water Supply" or "Animal Deaths" or "Accidents" or "Road Blockage",
-  "location": "extracted location",
-  "priority": "Low", "Medium", or "High",
-  "summary": "short summary"
+  "category": "chosen category",
+  "location": "extracted location or 'No location mentioned'",
+  "priority": "Low", "Medium", or "High"
 }
 
 Complaint: "${message}"`;
@@ -105,43 +75,48 @@ Complaint: "${message}"`;
     let classified;
     try {
       classified = JSON.parse(text);
-      agentThinking = agentThinking.concat(classified.thinking || ["Analysis complete"]);
-    } catch (e) {
-      agentThinking.push("⚠️ AI response unclear, using safe defaults");
+    } catch (parseErr) {
+      console.error("JSON parse failed, using fallback");
       classified = {
         category: "Roads & Potholes",
         location: "No location mentioned",
-        priority: "Medium",
-        summary: message.substring(0, 100),
-        thinking: ["Used fallback classification"]
+        priority: "Medium"
       };
     }
 
-    agentThinking.push("💾 Saving to database...");
-
+    // Insert ticket
     const { data: insertedData, error: insertError } = await supabase
       .from('tickets')
       .insert({
         citizen_message: message,
         category: classified.category,
-        location: classified.location,
+        location: classified.location || "No location mentioned",
         priority: classified.priority,
         status: 'Open',
-        photo_base64: photoBase64,
-        photo_analysis: photoAnalysis
+        photo_base64: photoBase64
       })
       .select();
 
     if (insertError) throw insertError;
 
-    const { count } = await supabase.from('tickets').select('id', { count: 'exact', head: true });
+    // Generate ticket_id
+    const { count, error: countError } = await supabase
+      .from('tickets')
+      .select('id', { count: 'exact', head: true });
+
+    if (countError) throw countError;
+
     const ticket_id = `TKT-${String(count || 1).padStart(4, '0')}`;
 
-    await supabase.from('tickets').update({ ticket_id }).eq('id', insertedData[0].id);
+    // Save ticket_id
+    const { error: updateError } = await supabase
+      .from('tickets')
+      .update({ ticket_id: ticket_id })
+      .eq('id', insertedData[0].id);
 
-    agentThinking.push(`✅ Ticket created: ${ticket_id}`);
+    if (updateError) throw updateError;
 
-    // Success page with AI agent thinking
+    // Success page
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -149,40 +124,24 @@ Complaint: "${message}"`;
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Complaint Submitted</title>
-        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
         <style>
-          body { font-family: 'Poppins', sans-serif; background: #f0f4f8; padding: 20px; }
-          .card { max-width: 800px; margin: 0 auto; background: white; border-radius: 15px; padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-          h1 { color: #27ae60; text-align: center; }
-          .agent-trace { background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }
-          .step { margin: 8px 0; padding: 12px; background: #e9ecef; border-left: 5px solid #3498db; border-radius: 8px; }
+          body { font-family: 'Poppins', sans-serif; background: #f0f4f8; text-align: center; padding: 50px; }
+          .card { max-width: 700px; margin: 0 auto; background: white; border-radius: 15px; padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+          h1 { color: #27ae60; }
           .photo { max-width: 100%; max-height: 400px; border-radius: 10px; margin: 20px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-          a { display: block; text-align: center; margin-top: 30px; padding: 12px 24px; background: #3498db; color: white; text-decoration: none; border-radius: 8px; width: fit-content; margin-left: auto; margin-right: auto; }
+          a { display: inline-block; margin-top: 30px; padding: 12px 24px; background: #3498db; color: white; text-decoration: none; border-radius: 8px; }
           a:hover { background: #2980b9; }
         </style>
       </head>
       <body>
         <div class="card">
-          <h1>🎉 Complaint Registered Successfully!</h1>
+          <h1>Thank You! Your Complaint is Registered</h1>
           <p><strong>Ticket ID:</strong> ${ticket_id}</p>
           <p><strong>Category:</strong> ${classified.category}</p>
-          <p><strong>Location:</strong> ${classified.location}</p>
+          <p><strong>Location:</strong> ${classified.location || "No location mentioned"}</p>
           <p><strong>Priority:</strong> ${classified.priority}</p>
-          <p><strong>Summary:</strong> ${classified.summary}</p>
-
-          ${photoDataUrl ? `<img src="${photoDataUrl}" alt="Evidence" class="photo">` : '<p><em>No photo attached</em></p>'}
-
-          ${photoAnalysis ? `
-          <div style="background:#e8f5e8; padding:15px; border-radius:10px; margin:20px 0;">
-            <strong>AI Photo Analysis (40-50 words):</strong><br>${photoAnalysis}
-          </div>
-          ` : ''}
-
-          <div class="agent-trace">
-            <h3>🤖 AI Agent Thinking Process</h3>
-            ${agentThinking.map(step => `<div class="step">${step}</div>`).join('')}
-          </div>
-
+          ${photoDataUrl ? `<img src="${photoDataUrl}" alt="Uploaded photo" class="photo">` : '<p><em>No photo attached (optional)</em></p>'}
+          <br>
           <a href="/">Submit Another Complaint</a>
         </div>
       </body>
@@ -204,16 +163,16 @@ app.post('/login', (req, res) => {
   const { username, password } = req.body;
   if (username === 'admin' && password === 'city123') {
     res.send(`
-      <div style="text-align:center; margin-top:100px; font-family: 'Poppins', sans-serif;">
+      <div style="text-align:center; margin-top:100px;">
         <h1 style="color:green;">Login Successful! 🎉</h1>
         <p>Welcome, Department Official</p>
-        <a href="/dashboard" style="font-size:1.2em; padding:12px 24px; background:#3498db; color:white; text-decoration:none; border-radius:8px;">Go to Dashboard →</a>
+        <a href="/dashboard" style="font-size:1.2em; padding:10px 20px; background:#3498db; color:white; text-decoration:none; border-radius:5px;">Go to Dashboard →</a>
         <br><br><a href="/">← Back to Home</a>
       </div>
     `);
   } else {
     res.send(`
-      <div style="text-align:center; margin-top:100px; font-family: 'Poppins', sans-serif;">
+      <div style="text-align:center; margin-top:100px;">
         <h1 style="color:red;">Invalid Credentials</h1>
         <a href="/">← Try Again</a>
       </div>
@@ -221,7 +180,7 @@ app.post('/login', (req, res) => {
   }
 });
 
-// Dashboard - shows all tickets
+// Dashboard - shows all tickets with update options
 app.get('/dashboard', async (req, res) => {
   try {
     const { data: tickets, error } = await supabase
@@ -233,7 +192,7 @@ app.get('/dashboard', async (req, res) => {
 
     let ticketList = '';
     if (tickets.length === 0) {
-      ticketList = '<p style="text-align:center; color:gray;">No complaints yet.</p>';
+      ticketList = '<p style="text-align:center; color:gray; font-size:1.2em;">No complaints yet.</p>';
     } else {
       tickets.forEach(ticket => {
         const photoHtml = ticket.photo_base64 
@@ -246,15 +205,35 @@ app.get('/dashboard', async (req, res) => {
 
         ticketList += `
           <div style="background:#f8f9fa; border-radius:10px; padding:20px; margin-bottom:20px; box-shadow:0 4px 10px rgba(0,0,0,0.1);">
-            <h3>Ticket ID: ${ticket.ticket_id || 'N/A'}</h3>
+            <h3 style="color:#2c3e50;">Ticket ID: ${ticket.ticket_id}</h3>
             <p><strong>Status:</strong> ${ticket.status}</p>
             <p><strong>Category:</strong> ${ticket.category}</p>
             <p><strong>Location:</strong> ${ticket.location}</p>
             <p><strong>Priority:</strong> ${ticket.priority}</p>
+            <p><strong>Assigned Team:</strong> ${ticket.assigned_team || 'Not assigned'}</p>
             <p><strong>Submitted:</strong> ${new Date(ticket.created_at).toLocaleString()}</p>
             <p><strong>Description:</strong><br>${ticket.citizen_message.replace(/\n/g, '<br>')}</p>
             ${analysisHtml}
             ${photoHtml}
+            <div style="margin-top:20px;">
+              <form action="/update-ticket" method="POST">
+                <input type="hidden" name="ticket_id" value="${ticket.ticket_id}">
+                <select name="status" style="padding:8px; border-radius:5px; margin-right:10px;">
+                  <option value="${ticket.status}" selected>${ticket.status}</option>
+                  <option value="Open">Open</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Resolved">Resolved</option>
+                </select>
+                <select name="assigned_team" style="padding:8px; border-radius:5px; margin-right:10px;">
+                  <option value="${ticket.assigned_team || ''}" selected>${ticket.assigned_team || 'Assign Team'}</option>
+                  <option value="Team A">Team A</option>
+                  <option value="Team B">Team B</option>
+                  <option value="Road Crew">Road Crew</option>
+                  <option value="Animal Control">Animal Control</option>
+                </select>
+                <button type="submit" style="background:#27ae60; color:white; padding:8px 16px; border:none; border-radius:5px;">Update & Dispatch</button>
+              </form>
+            </div>
           </div>
         `;
       });
@@ -270,10 +249,11 @@ app.get('/dashboard', async (req, res) => {
         <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
         <style>
           body { font-family: 'Poppins', sans-serif; background: #f0f4f8; padding: 40px; }
-          .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 15px; padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+          .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 15px; padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
           h1 { text-align: center; color: #2c3e50; }
           .logout { text-align: right; margin-bottom: 20px; }
           .logout a { background: #e74c3c; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; }
+          .tickets { margin-top: 30px; }
         </style>
       </head>
       <body>
@@ -282,12 +262,12 @@ app.get('/dashboard', async (req, res) => {
             <a href="/">Logout</a>
           </div>
           <h1>Department Dashboard</h1>
-          <p style="text-align:center;">All Citizen Complaints</p>
-          <div style="margin-top:30px;">
+          <p style="text-align:center; font-size:1.2em; color:#555;">All Citizen Complaints</p>
+          <div class="tickets">
             ${ticketList}
           </div>
           <div style="text-align:center; margin-top:40px;">
-            <a href="/">Back to Home</a>
+            <a href="/" style="background:#3498db; color:white; padding:12px 24px; border-radius:8px; text-decoration:none;">Back to Home</a>
           </div>
         </div>
       </body>
@@ -296,10 +276,63 @@ app.get('/dashboard', async (req, res) => {
 
   } catch (err) {
     console.error("Dashboard error:", err);
-    res.send(`<h2>Error</h2><a href="/">Back</a>`);
+    res.send(`
+      <h2 style="color:red; text-align:center;">Error Loading Dashboard</h2>
+      <p>Check server logs.</p>
+      <a href="/">Back to Home</a>
+    `);
   }
 });
 
+// Update ticket status and assign team
+app.post('/update-ticket', async (req, res) => {
+  const { ticket_id, status, assigned_team } = req.body;
+
+  console.log("Update request for:", ticket_id, status, assigned_team); // Debug
+
+  if (!ticket_id) {
+    return res.send(`
+      <h2 style="color:red;">Error: No Ticket ID</h2>
+      <a href="/dashboard">Back to Dashboard</a>
+    `);
+  }
+
+  try {
+    const { error } = await supabase
+      .from('tickets')
+      .update({ 
+        status: status,
+        assigned_team: assigned_team || null
+      })
+      .eq('ticket_id', ticket_id);
+
+    if (error) {
+      console.error("Supabase update error:", error);
+      return res.send(`
+        <h2 style="color:red;">Update Failed</h2>
+        <p>Error: ${error.message}</p>
+        <a href="/dashboard">Back to Dashboard</a>
+      `);
+    }
+
+    // Success — Supabase returns data: null on successful update
+    res.send(`
+      <h2 style="color:green; text-align:center;">Ticket Updated Successfully!</h2>
+      <p>Ticket ${ticket_id} updated.</p>
+      <p><strong>New Status:</strong> ${status}</p>
+      <p><strong>Assigned Team:</strong> ${assigned_team || 'None'}</p>
+      <a href="/dashboard">← Back to Dashboard</a>
+    `);
+
+  } catch (err) {
+    console.error("Unexpected error:", err);
+    res.send(`
+      <h2 style="color:red;">Unexpected Error</h2>
+      <p>${err.message}</p>
+      <a href="/dashboard">Back</a>
+    `);
+  }
+});
 // Ticket Status API
 app.get('/api/ticket-status', async (req, res) => {
   const ticketId = req.query.ticketId;
