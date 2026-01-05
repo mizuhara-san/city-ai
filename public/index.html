@@ -53,7 +53,7 @@
 
   <div class="container">
     <div class="login-section">
-      <button class="login-btn" onclick="document.getElementById('loginModal').style.display='block'">Department Login</button>
+      <button class="login-btn" onclick="document.getElementById('loginModal').style.display='flex'">Department Login</button>
     </div>
 
     <h2 id="complaint-form">Submit a New Complaint</h2>
@@ -117,20 +117,19 @@
     </div>
   </div>
 
-  <!-- Login Modal -->
-  <div id="loginModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:flex; justify-content:center; align-items:center;">
-    <div style="background:white; padding:30px; border-radius:15px; width:320px; text-align:center;">
-      <h2>Department Login</h2>
-      <form action="/login" method="POST">
-        <input type="text" name="username" placeholder="Username" required style="width:100%; padding:12px; margin:10px 0; border-radius:8px; border:1px solid #ddd;"><br>
-        <input type="password" name="password" placeholder="Password" required style="width:100%; padding:12px; margin:10px 0; border-radius:8px; border:1px solid #ddd;"><br>
-        <button type="submit" style="background:#3498db; color:white; padding:12px 24px; border:none; border-radius:50px; width:100%;">Login</button>
-      </form>
-      <button onclick="document.getElementById('loginModal').style.display='none'" style="margin-top:15px; background:#e74c3c; color:white; padding:10px 20px; border:none; border-radius:50px;">Close</button>
-      <p style="margin-top:15px; color:gray; font-size:0.9em;">Demo: admin / city123</p>
-    </div>
+<!--department login modal-->
+<div id="loginModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index: 9999; justify-content: center; align-items: center;">
+  <div style="background:white; padding:40px; border-radius:20px; width:350px; text-align:center; box-shadow: 0 10px 30px rgba(0,0,0,0.3); position: relative;">
+    <h2 style="margin-bottom: 25px; color: #2c3e50;">Department Login</h2>
+    <form action="/login" method="POST">
+      <input type="text" name="username" placeholder="Username" required style="width:100%; padding:15px; margin-bottom:15px; border-radius:10px; border:1px solid #ddd; font-size: 16px;">
+      <input type="password" name="password" placeholder="Password" required style="width:100%; padding:15px; margin-bottom:20px; border-radius:10px; border:1px solid #ddd; font-size: 16px;">
+      <button type="submit" style="background:#3498db; color:white; padding:15px; border:none; border-radius:50px; width:100%; cursor:pointer; font-weight:600; font-size: 1.1em; transition: 0.3s;">Login</button>
+    </form>
+    <button onclick="document.getElementById('loginModal').style.display='none'" style="margin-top:15px; background:#e74c3c; color:white; padding:10px 25px; border:none; border-radius:50px; cursor:pointer; font-weight: 600;">Close</button>
+    <p style="margin-top:20px; color:gray; font-size:0.9em;">Demo: admin / city123</p>
   </div>
-
+</div>
   <!-- Leaflet Map -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
