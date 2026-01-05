@@ -8,7 +8,7 @@
     {
       "src": "public/**",
      "use":"@vercel/static"
-    },
+    }
     
   ],
   "functions":{
@@ -16,7 +16,7 @@
     "maxDuration": 30
     }
   },
-  
+
   "rewrites":[
     {"src": "/(.*)",
      "dest": "server.js"
