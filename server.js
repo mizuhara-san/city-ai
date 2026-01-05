@@ -356,7 +356,6 @@ app.post('/update-ticket', async (req, res) => {
     `);
   }
 
-  try {
     const { error } = await supabase
       .from('tickets')
       .update({
