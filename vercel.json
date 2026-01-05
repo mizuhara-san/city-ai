@@ -16,13 +16,7 @@
     "maxDuration": 30
     }
   },
-
-  "rewrites":[
-    {"src": "/(.*)",
-     "dest": "server.js"
-    }
-  ],
-
+  
   "routes": [
     {
       "src": "/public/(.*)",
