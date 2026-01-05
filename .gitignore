@@ -53,9 +53,18 @@ out
 # Nuxt.js build / generate output
 .nuxt
 
+
 # Gatsby files
 .cache/
 # public is NOT ignored anymore so cities.js can be uploaded
+=======
+# dist  <-- Removed to ensure build folders are tracked if needed
+.output
+
+# Gatsby files
+.cache/
+# public <-- THIS WAS THE PROBLEM. Commented out so public/cities.js can be pushed.
+533119bf605a17be226c6328143b8fe1d95709ce
 
 # VuePress build output
 .vuepress/dist
@@ -79,4 +88,9 @@ out
 node_modules/
 
 # Build outputs
+HEAD
 build/
+=======
+build/
+# dist/ <-- Commented out to match your folder structure
+533119bf605a17be226c6328143b8fe1d95709ce
