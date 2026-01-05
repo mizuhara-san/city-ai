@@ -8,8 +8,21 @@
     {
       "src": "public/**",
      "use":"@vercel/static"
+    },
+    
+  ],
+  "functions":{
+    "api/index.js":{
+    "maxDuration": 30
+    }
+  },
+  
+  "rewrites":[
+    {"src": "/(.*)",
+     "dest": "server.js"
     }
   ],
+
   "routes": [
     {
       "src": "/public/(.*)",

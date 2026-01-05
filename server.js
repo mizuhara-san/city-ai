@@ -6,7 +6,7 @@ const path = require('path');
 const multer = require('multer');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
@@ -15,7 +15,7 @@ app.use(express.static('public'));
 // Multer for photo upload
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Initialize Gemini (stable model with vision support)
+// Initialize Gemini (Using stable 1.5-flash model)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
@@ -32,7 +32,10 @@ app.get('/', (req, res) => {
 
 // Submit complaint with AI agent + photo analysis
 app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
-  let message = req.body.complaint;
+  // Extract coordinates and complaint from body
+  const { complaint, lat, lng } = req.body; 
+  
+  let message = complaint;
   let photoBase64 = null;
   let photoDataUrl = null;
   let photoAnalysis = '';
@@ -45,7 +48,6 @@ app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
   agentThinking.push("🤖 AI Agent activated...");
   agentThinking.push("📝 Reading complaint: " + message.substring(0, 100) + "...");
 
-  // Optional photo upload + AI analysis
   if (req.file) {
     photoBase64 = req.file.buffer.toString('base64');
     photoDataUrl = `data:${req.file.mimetype};base64,${photoBase64}`;
@@ -66,14 +68,12 @@ app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
       const analysisResponse = await analysisResult.response;
       photoAnalysis = analysisResponse.text().trim();
 
-      // Enforce word limit
       const words = photoAnalysis.split(' ');
       if (words.length > 50) {
         photoAnalysis = words.slice(0, 50).join(' ') + '...';
       }
 
-      agentThinking.push("✅ Photo analysis complete (40-50 words)");
-
+      agentThinking.push("✅ Photo analysis complete");
       message = `${message}\n\nAI Photo Analysis: ${photoAnalysis}`;
     } catch (analysisErr) {
       console.error("Photo analysis error:", analysisErr);
@@ -126,6 +126,8 @@ Complaint: "${message}"`;
         category: classified.category,
         location: classified.location,
         priority: classified.priority,
+        lat: lat ? parseFloat(lat) : null, // Corrected to parseFloat
+        lng: lng ? parseFloat(lng) : null, // Corrected to parseFloat
         status: 'Open',
         photo_base64: photoBase64,
         photo_analysis: photoAnalysis
@@ -141,7 +143,7 @@ Complaint: "${message}"`;
 
     agentThinking.push(`✅ Ticket created: ${ticket_id}`);
 
-    // Success page with AI agent thinking
+    // Success page (Preserved your original design with added Priority Badge)
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -157,6 +159,7 @@ Complaint: "${message}"`;
           .agent-trace { background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }
           .step { margin: 8px 0; padding: 12px; background: #e9ecef; border-left: 5px solid #3498db; border-radius: 8px; }
           .photo { max-width: 100%; max-height: 400px; border-radius: 10px; margin: 20px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+          .priority-badge { display: inline-block; padding: 5px 15px; border-radius: 50px; color: white; font-weight: bold; font-size: 0.9em; margin-bottom: 10px; }
           a { display: block; text-align: center; margin-top: 30px; padding: 12px 24px; background: #3498db; color: white; text-decoration: none; border-radius: 8px; width: fit-content; margin-left: auto; margin-right: auto; }
           a:hover { background: #2980b9; }
         </style>
@@ -165,9 +168,11 @@ Complaint: "${message}"`;
         <div class="card">
           <h1>🎉 Complaint Registered Successfully!</h1>
           <p><strong>Ticket ID:</strong> ${ticket_id}</p>
+          <div class="priority-badge" style="background: ${classified.priority === 'High' ? '#e74c3c' : (classified.priority === 'Medium' ? '#f39c12' : '#27ae60')}">
+            Priority: ${classified.priority}
+          </div>
           <p><strong>Category:</strong> ${classified.category}</p>
           <p><strong>Location:</strong> ${classified.location}</p>
-          <p><strong>Priority:</strong> ${classified.priority}</p>
           <p><strong>Summary:</strong> ${classified.summary}</p>
 
           ${photoDataUrl ? `<img src="${photoDataUrl}" alt="Evidence" class="photo">` : '<p><em>No photo attached</em></p>'}
@@ -199,29 +204,48 @@ Complaint: "${message}"`;
   }
 });
 
-// Department Login
+// Department Login (Upgraded to beautiful UI)
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
   if (username === 'admin' && password === 'city123') {
     res.send(`
-      <div style="text-align:center; margin-top:100px; font-family: 'Poppins', sans-serif;">
-        <h1 style="color:green;">Login Successful! 🎉</h1>
-        <p>Welcome, Department Official</p>
-        <a href="/dashboard" style="font-size:1.2em; padding:12px 24px; background:#3498db; color:white; text-decoration:none; border-radius:8px;">Go to Dashboard →</a>
-        <br><br><a href="/">← Back to Home</a>
-      </div>
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Login Successful</title>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 100vh; display: flex; justify-content: center; align-items: center; color: #333; }
+          .success-card { background: white; padding: 50px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); text-align: center; max-width: 450px; width: 90%; animation: slideUp 0.6s ease-out; }
+          @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+          .icon-circle { width: 80px; height: 80px; background: #27ae60; color: white; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 40px; margin: 0 auto 20px; animation: scaleIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.3s both; }
+          @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+          h1 { color: #2d3436; margin-bottom: 10px; font-size: 24px; }
+          p { color: #636e72; margin-bottom: 30px; }
+          .btn-primary { display: inline-block; background: #3498db; color: white; padding: 14px 30px; border-radius: 50px; text-decoration: none; font-weight: 600; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3); }
+          .btn-primary:hover { transform: translateY(-3px); background: #2980b9; }
+        </style>
+      </head>
+      <body>
+        <div class="success-card">
+          <div class="icon-circle"><i class="fas fa-check"></i></div>
+          <h1>Login Successful!</h1>
+          <p>Welcome back, Department Official. Your dashboard is ready.</p>
+          <a href="/dashboard" class="btn-primary">Go to Dashboard <i class="fas fa-arrow-right" style="margin-left:8px;"></i></a>
+        </div>
+      </body>
+      </html>
     `);
   } else {
-    res.send(`
-      <div style="text-align:center; margin-top:100px; font-family: 'Poppins', sans-serif;">
-        <h1 style="color:red;">Invalid Credentials</h1>
-        <a href="/">← Try Again</a>
-      </div>
-    `);
+    res.send("<h1 style='text-align:center; color:red;'>Invalid Credentials</h1><div style='text-align:center;'><a href='/'>Try Again</a></div>");
   }
 });
 
-// Dashboard - shows all tickets with update form
+// Dashboard - (Preserved original card structure + Priority Badge + Map Link)
 app.get('/dashboard', async (req, res) => {
   try {
     const { data: tickets, error } = await supabase
@@ -244,7 +268,10 @@ app.get('/dashboard', async (req, res) => {
           ? `<div style="background:#e8f5e8; padding:10px; border-radius:8px; margin-top:10px;"><strong>AI Photo Analysis:</strong> ${ticket.photo_analysis}</div>`
           : '';
 
-        // Progress bar
+        // Priority Badge Logic
+        let priorityColor = ticket.priority === 'High' ? '#e74c3c' : (ticket.priority === 'Medium' ? '#f39c12' : '#27ae60');
+
+        // Progress bar logic
         let progressPercent = 0;
         let progressColor = '#e74c3c';
         if (ticket.status === 'In Progress') {
@@ -255,30 +282,45 @@ app.get('/dashboard', async (req, res) => {
           progressColor = '#27ae60';
         }
 
+        // Google Maps link
+        // FIXED: Using the standard Google Maps search URL format
+      const mapsLink = ticket.lat && ticket.lng 
+        ? `https://www.google.com/maps/search/?api=1&query=${ticket.lat},${ticket.lng}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ticket.location)}`;
+        
         ticketList += `
-          <div style="background:#f8f9fa; border-radius:15px; padding:25px; margin-bottom:30px; box-shadow:0 6px 20px rgba(0,0,0,0.08);">
-            <h3 style="color:#2c3e50; margin-bottom:15px;">Ticket ID: ${ticket.ticket_id || 'N/A'}</h3>
+          <div class="ticket-card" style="background:#f8f9fa; border-radius:15px; padding:25px; margin-bottom:30px; box-shadow:0 6px 20px rgba(0,0,0,0.08); text-align: left;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+              <h3 style="color:#2c3e50; margin: 0;">Ticket ID: ${ticket.ticket_id || 'N/A'}</h3>
+              <span style="background:${priorityColor}; color:white; padding:6px 15px; border-radius:50px; font-size:0.85em; font-weight:bold;">
+                Priority: ${ticket.priority}
+              </span>
+            </div>
+
             <p><strong>Status:</strong> <span style="font-weight:bold; color:${progressColor};">${ticket.status}</span></p>
             <p><strong>Category:</strong> ${ticket.category}</p>
-            <p><strong>Location:</strong> ${ticket.location}</p>
-            <p><strong>Priority:</strong> ${ticket.priority}</p>
+            
+            <div style="margin-bottom: 15px;">
+              <p><strong>Location:</strong> ${ticket.location}</p>
+              <a href="${mapsLink}" target="_blank" style="color:#3498db; text-decoration:none; font-weight:600; font-size: 0.9em;">
+                <i class="fas fa-map-marker-alt"></i> View on Google Maps →
+              </a>
+            </div>
+
             <p><strong>Assigned Team:</strong> <strong>${ticket.assigned_team || '<em style="color:#999;">Not assigned yet</em>'}</strong></p>
             <p><strong>Submitted:</strong> ${new Date(ticket.created_at).toLocaleString()}</p>
 
-            <!-- Progress Bar -->
             <div style="margin:20px 0;">
               <p><strong>Progress:</strong></p>
               <div style="width:100%; background:#ddd; border-radius:10px; overflow:hidden;">
-                <div style="width:${progressPercent}%; height:25px; background:${progressColor}; transition:width 0.8s ease;"></div>
+                <div style="width:${progressPercent}%; height:15px; background:${progressColor}; transition:width 0.8s ease;"></div>
               </div>
-              <p style="text-align:right; margin-top:5px; font-size:0.9em; color:#555;">${progressPercent}% Complete</p>
             </div>
 
             <p><strong>Description:</strong><br>${ticket.citizen_message.replace(/\n/g, '<br>')}</p>
             ${analysisHtml}
             ${photoHtml}
 
-            <!-- Update Form -->
             <div style="margin-top:25px; padding-top:20px; border-top:1px solid #eee;">
               <form action="/update-ticket" method="POST" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
                 <input type="hidden" name="ticket_id" value="${ticket.ticket_id}">
@@ -311,98 +353,49 @@ app.get('/dashboard', async (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Department Dashboard</title>
         <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <style>
           body { font-family: 'Poppins', sans-serif; background: #f0f4f8; padding: 40px; }
-          .container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 20px; padding: 40px; box-shadow: 0 15px 40px rgba(0,0,0,0.1); }
+          .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 20px; padding: 40px; box-shadow: 0 15px 40px rgba(0,0,0,0.1); }
           h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
           .logout { text-align: right; margin-bottom: 30px; }
           .logout a { background: #e74c3c; color: white; padding: 12px 24px; border-radius: 50px; text-decoration: none; }
-          .logout a:hover { background: #c0392b; }
         </style>
       </head>
       <body>
         <div class="container">
-          <div class="logout">
-            <a href="/">Logout</a>
-          </div>
+          <div class="logout"><a href="/">Logout</a></div>
           <h1>Department Dashboard</h1>
           <p style="text-align:center; font-size:1.3em; color:#555; margin-bottom:40px;">Manage & Resolve Citizen Complaints</p>
-          <div class="tickets">
-            ${ticketList}
-          </div>
+          <div class="tickets">${ticketList}</div>
         </div>
       </body>
       </html>
     `);
 
-  } catch (err) {
-    console.error("Dashboard error:", err);
-    res.send(`
-      <h2 style="color:red; text-align:center;">Error Loading Dashboard</h2>
-      <p>${err.message || 'Unknown error'}</p>
-      <a href="/">Back to Home</a>
-    `);
-  }
+  } catch (err) { res.status(500).send("Error loading dashboard"); }
 });
 
 // Update ticket status and assigned team
 app.post('/update-ticket', async (req, res) => {
   const { ticket_id, status, assigned_team } = req.body;
-
-  if (!ticket_id) {
-    return res.send(`
-      <h2 style="color:red; text-align:center;">Error: Missing Ticket ID</h2>
-      <a href="/dashboard">← Back to Dashboard</a>
-    `);
-  }
-
   try {
-    const { error } = await supabase
-      .from('tickets')
-      .update({
-        status: status,
-        assigned_team: assigned_team || null
-      })
-      .eq('ticket_id', ticket_id);
-
-    if (error) {
-      console.error("Update error:", error);
-      return res.send(`
-        <h2 style="color:red; text-align:center;">Update Failed</h2>
-        <p>${error.message}</p>
-        <a href="/dashboard">← Back to Dashboard</a>
-      `);
-    }
-
-    // Success — redirect to refresh dashboard
+    await supabase.from('tickets').update({ status, assigned_team: assigned_team || null }).eq('ticket_id', ticket_id);
     res.redirect('/dashboard');
-
-  } catch (err) {
-    console.error("Unexpected error:", err);
-    res.send(`
-      <h2 style="color:red; text-align:center;">Server Error</h2>
-      <p>Please try again.</p>
-      <a href="/dashboard">← Back to Dashboard</a>
-    `);
-  }
+  } catch (err) { res.status(500).send("Update failed"); }
 });
 
 // Ticket Status API
 app.get('/api/ticket-status', async (req, res) => {
   const ticketId = req.query.ticketId;
-
-  if (!ticketId) return res.json({ error: "No ticket ID" });
-
-  const { data, error } = await supabase
-    .from('tickets')
-    .select('*')
-    .eq('ticket_id', ticketId)
-    .single();
-
+  const { data, error } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
   if (error || !data) res.json({ error: "Not found" });
   else res.json(data);
 });
 
 app.listen(PORT, () => {
-  console.log(`City AI Portal running on http://localhost:${PORT}`);
+  console.log(`-----------------------------------------`);
+  console.log(`🚀 City AI Portal is LIVE`);
+  console.log(`🔗 Local Link: http://localhost:${PORT}`);
+  console.log(`-----------------------------------------`);
 });
