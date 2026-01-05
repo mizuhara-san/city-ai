@@ -42,7 +42,7 @@ pids
 .env.test
 .env*.local
 
-# parcel-bundler cache[](https://parceljs.org/)
+# parcel-bundler cache
 .cache
 .parcel-cache
 
@@ -52,12 +52,12 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-dist
+# dist  <-- Removed to ensure build folders are tracked if needed
 .output
 
 # Gatsby files
 .cache/
-public
+# public <-- THIS WAS THE PROBLEM. Commented out so public/cities.js can be pushed.
 
 # VuePress build output
 .vuepress/dist
@@ -80,6 +80,6 @@ public
 # node_modules
 node_modules/
 
-# Build outputs (if any)
+# Build outputs
 build/
-dist/
+# dist/ <-- Commented out to match your folder structure
