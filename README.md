@@ -5,8 +5,8 @@ City AI – Smart Civic Complaint Portal
 City AI Banner
 An AI-powered civic grievance platform that makes cities cleaner, safer, and more responsive
 Hackathon: GDG Hack2Skill 2026
-Live Demo: (Deployed URL here after deployment)
-Demo Video: (YouTube/Drive link here)
+Live Demo: https://city-ai.vercel.app/
+Demo Video: Video 🔗: https://drive.google.com/file/d/1AUKlbOY3qHiEV2bS8oAmmpr3j1GEAfYR/view?usp=drivesdk 
 
 🌟 Key Features
 
@@ -68,10 +68,8 @@ Works seamlessly on phones and desktops
 
 
 
-LayerTechnologyFrontendHTML5, CSS3, JavaScript, Leaflet (OpenStreetMap)BackendNode.js + ExpressDatabaseSupabase (PostgreSQL)AIGoogle Gemini 2.5 Flash (Text + Vision)File UploadMulterMapsLeaflet + OpenStreetMap (Free)DeploymentRender.com / Vercel (Free tier)
+LayerTechnologyFrontend HTML5, CSS3, JavaScript, Leaflet (OpenStreetMap) BackendNode.js + Express Database Supabase (PostgreSQL) AIGoogle Gemini 2.5 Flash (Text + Vision) File Upload Multer MapsLeaflet + OpenStreetMap (Free) Deployment Vercel (Free tier)
 
-📱 Screenshots
-(Replace with your actual screenshots after taking them)
 
 
 
@@ -91,7 +89,7 @@ Mobile ViewAI Agent Thinking ProcessDepartment DashboardMobileAI ThinkingDashboa
 
 🛠️ Local Setup
 
-Clone the repositoryBashgit clone https://github.com/[your-username]/city-ai.git
+Clone the repositoryBashgit clone https://github.com/mizuhara-san/city-ai
 cd city-ai
 Install dependenciesBashnpm install
 Create .env file in rootenvGEMINI_API_KEY=your_gemini_api_key
@@ -176,7 +174,7 @@ Open in browserhttp://localhost:3000
 
 
 
-ColumnTypeDescriptionNullableidbigintAuto-increment IDNoticket_idtexte.g., TKT-0019Yescitizen_messagetextFull complaint textNocategorytextAI-classified categoryNolocationtextAddress from GPS/manualNoprioritytextLow / Medium / HighNostatustextOpen / In Progress / ResolvedNophoto_base64textBase64-encoded imageYesphoto_analysistextAI-generated photo descriptionYescreated_attimestampAuto-generatedNo
+ColumnType Description Nullable idbigint Auto-increment IDNo ticket_id texte.g., TKT-0019 Yescitizen_message textFull complaint textNocategory textAI-classified categoryNo location textAddress from GPS/manualNoprioritytextLow / Medium / HighNostatustextOpen / In Progress / ResolvedNo photo_base64 text Base64-encoded image Yesphoto_analysis textAI-generated photo description Yes created_at timestampAuto-generatedNo
 Enable Row Level Security (RLS) and allow public insert/select/update as needed.
 
 🚀 Deployment (Free Options)
@@ -203,8 +201,12 @@ Integrate WhatsApp/SMS notifications
 Add analytics for departments
 
 
-👨‍💻 Author
-[Your Name]
+Our Team:
+Rohith
+Tazeem
+Balu
+Yeswanth
+
 GDG Hack2Skill 2026 Participant
 Making cities smarter, one complaint at a time.
 
