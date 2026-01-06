@@ -68,7 +68,7 @@ Works seamlessly on phones and desktops
 
 
 
-LayerTechnologyFrontend HTML5, CSS3, JavaScript, Leaflet (OpenStreetMap) BackendNode.js + Express Database Supabase (PostgreSQL) AIGoogle Gemini 2.5 Flash (Text + Vision) File Upload Multer MapsLeaflet + OpenStreetMap (Free) Deployment Vercel (Free tier)
+LayerTechnologyFrontend HTML5, CSS3, JavaScript, Leaflet (OpenStreetMap) BackendNode.js + Express Database Supabase (PostgreSQL) AIGoogle Gemini 2.5 Flash (Text + Vision) File Upload Multer MapsLeaflet + OpenStreetMap Deployment Vercel 
 
 
 
