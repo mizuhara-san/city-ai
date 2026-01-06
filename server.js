@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cookieParser = require('cookie-parser');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
@@ -11,11 +12,12 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
+app.use(cookieParser());
 
 // Multer for photo upload
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Initialize Gemini (Using stable 1.5-flash model)
+// Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
@@ -25,16 +27,230 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
+// Helper to get current citizen user
+async function getCurrentUser(req) {
+  const token = req.cookies.supabase_token;
+  if (!token) return null;
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) return null;
+  return data.user;
+}
+
 // Home page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Submit complaint with AI agent + photo analysis
+// Citizen Register
+app.post('/citizen-register', async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw error;
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Registration Successful</title>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+        <style>
+          body { font-family: 'Poppins', sans-serif; background: #f0f4f8; display: flex; justify-content: center; align-items: center; height: 100vh; }
+          .card { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 15px 40px rgba(0,0,0,0.1); text-align: center; max-width: 400px; }
+          h2 { color: #27ae60; }
+          a { display: inline-block; margin-top: 20px; padding: 12px 24px; background: #3498db; color: white; border-radius: 50px; text-decoration: none; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>Registration Successful!</h2>
+          <p>Please check your email for confirmation.</p>
+          <a href="/">Back to Home</a>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (err) {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Registration Error</title>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+        <style>
+          body { font-family: 'Poppins', sans-serif; background: #f0f4f8; display: flex; justify-content: center; align-items: center; height: 100vh; }
+          .card { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 15px 40px rgba(0,0,0,0.1); text-align: center; }
+          h2 { color: #e74c3c; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>Registration Failed</h2>
+          <p>${err.message || 'Unknown error'}</p>
+          <a href="/">Try Again</a>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+});
+
+// Citizen Login
+app.post('/citizen-login', async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+
+    res.cookie('supabase_token', data.session.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7 // 7 days
+    });
+
+    res.redirect('/');
+  } catch (err) {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Login Error</title>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+        <style>
+          body { font-family: 'Poppins', sans-serif; background: #f0f4f8; display: flex; justify-content: center; align-items: center; height: 100vh; }
+          .card { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 15px 40px rgba(0,0,0,0.1); text-align: center; }
+          h2 { color: #e74c3c; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>Login Failed</h2>
+          <p>${err.message || 'Unknown error'}</p>
+          <a href="/">Try Again</a>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+});
+
+// Citizen Logout
+app.get('/citizen-logout', (req, res) => {
+  res.clearCookie('supabase_token');
+  res.redirect('/');
+});
+
+// My Complaints Page
+app.get('/my-complaints', async (req, res) => {
+  const user = await getCurrentUser(req);
+  if (!user) {
+    return res.redirect('/');
+  }
+
+  const { data: tickets, error } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+
+  let ticketList = '';
+  if (!tickets || tickets.length === 0) {
+    ticketList = '<p style="text-align:center; color:#999; font-size:1.2em;">No complaints submitted yet.</p>';
+  } else {
+    tickets.forEach(ticket => {
+      const photoHtml = ticket.photo_base64 
+        ? `<img src="data:image/jpeg;base64,${ticket.photo_base64}" style="max-width:100%; border-radius:10px; margin-top:10px;" alt="Evidence">`
+        : '<p><em>No photo attached</em></p>';
+
+      const analysisHtml = ticket.photo_analysis 
+        ? `<div style="background:#e8f5e8; padding:10px; border-radius:8px; margin-top:10px;"><strong>AI Photo Analysis:</strong> ${ticket.photo_analysis}</div>`
+        : '';
+
+      let priorityColor = ticket.priority === 'High' ? '#e74c3c' : (ticket.priority === 'Medium' ? '#f39c12' : '#27ae60');
+
+      let progressPercent = 0;
+      let progressColor = '#e74c3c';
+      if (ticket.status === 'In Progress') {
+        progressPercent = 60;
+        progressColor = '#f39c12';
+      } else if (ticket.status === 'Resolved') {
+        progressPercent = 100;
+        progressColor = '#27ae60';
+      }
+
+      const mapsLink = ticket.lat && ticket.lng 
+        ? `https://www.google.com/maps/search/?api=1&query=${ticket.lat},${ticket.lng}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ticket.location)}`;
+
+      ticketList += `
+        <div style="background:#f8f9fa; border-radius:15px; padding:25px; margin-bottom:30px; box-shadow:0 6px 20px rgba(0,0,0,0.08);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="color:#2c3e50; margin:0;">Ticket ID: ${ticket.ticket_id}</h3>
+            <span style="background:${priorityColor}; color:white; padding:6px 15px; border-radius:50px; font-weight:bold;">${ticket.priority} Priority</span>
+          </div>
+          <p><strong>Status:</strong> <span style="color:${progressColor}; font-weight:bold;">${ticket.status}</span></p>
+          <p><strong>Category:</strong> ${ticket.category}</p>
+          <p><strong>Location:</strong> ${ticket.location} <a href="${mapsLink}" target="_blank" style="color:#3498db; text-decoration:none;">(View on Maps →)</a></p>
+          <p><strong>Submitted:</strong> ${new Date(ticket.created_at).toLocaleString()}</p>
+
+          <div style="margin:20px 0;">
+            <p><strong>Progress:</strong></p>
+            <div style="width:100%; background:#ddd; border-radius:10px; overflow:hidden;">
+              <div style="width:${progressPercent}%; height:25px; background:${progressColor}; transition:width 0.8s ease;"></div>
+            </div>
+            <p style="text-align:right; margin-top:5px; color:#555;">${progressPercent}% Complete</p>
+          </div>
+
+          <p><strong>Description:</strong><br>${ticket.citizen_message.replace(/\n/g, '<br>')}</p>
+          ${analysisHtml}
+          ${photoHtml}
+        </div>
+      `;
+    });
+  }
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>My Complaints</title>
+      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+      <style>
+        body { font-family: 'Poppins', sans-serif; background: #f0f4f8; padding: 40px; }
+        .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 20px; padding: 40px; box-shadow: 0 15px 40px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #2c3e50; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; flex-wrap: wrap; gap: 15px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>My Complaints</h1>
+          <div>
+            <span style="color:#27ae60; font-weight:bold;">Welcome, ${user.email}</span>
+            <a href="/citizen-logout" style="margin-left:20px; background:#e74c3c; color:white; padding:10px 20px; border-radius:50px; text-decoration:none;">Logout</a>
+          </div>
+        </div>
+        ${ticketList}
+        <div style="text-align:center; margin-top:40px;">
+          <a href="/" style="background:#3498db; color:white; padding:12px 24px; border-radius:50px; text-decoration:none;">Back to Home</a>
+        </div>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// Submit complaint with user linking
 app.post('/submit-complaint', upload.single('photo'), async (req, res) => {
-  // Extract coordinates and complaint from body
-  const { complaint, lat, lng } = req.body; 
-  
+  const { complaint, lat, lng, state, location_city } = req.body;
   let message = complaint;
   let photoBase64 = null;
   let photoDataUrl = null;
@@ -119,18 +335,24 @@ Complaint: "${message}"`;
 
     agentThinking.push("💾 Saving to database...");
 
+    const currentUser = await getCurrentUser(req);
+    const user_id = currentUser ? currentUser.id : null;
+
+    const location = classified.location || `${location_city || ''}, ${state || ''}`;
+
     const { data: insertedData, error: insertError } = await supabase
       .from('tickets')
       .insert({
         citizen_message: message,
         category: classified.category,
-        location: classified.location,
+        location: location,
         priority: classified.priority,
-        lat: lat ? parseFloat(lat) : null, // Corrected to parseFloat
-        lng: lng ? parseFloat(lng) : null, // Corrected to parseFloat
+        lat: lat ? parseFloat(lat) : null,
+        lng: lng ? parseFloat(lng) : null,
         status: 'Open',
         photo_base64: photoBase64,
-        photo_analysis: photoAnalysis
+        photo_analysis: photoAnalysis,
+        user_id: user_id
       })
       .select();
 
@@ -143,7 +365,8 @@ Complaint: "${message}"`;
 
     agentThinking.push(`✅ Ticket created: ${ticket_id}`);
 
-    // Success page (Preserved your original design with added Priority Badge)
+    const priorityColor = classified.priority === 'High' ? '#e74c3c' : (classified.priority === 'Medium' ? '#f39c12' : '#27ae60');
+
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -159,7 +382,7 @@ Complaint: "${message}"`;
           .agent-trace { background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }
           .step { margin: 8px 0; padding: 12px; background: #e9ecef; border-left: 5px solid #3498db; border-radius: 8px; }
           .photo { max-width: 100%; max-height: 400px; border-radius: 10px; margin: 20px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-          .priority-badge { display: inline-block; padding: 5px 15px; border-radius: 50px; color: white; font-weight: bold; font-size: 0.9em; margin-bottom: 10px; }
+          .priority-badge { display: inline-block; padding: 5px 15px; border-radius: 50px; color: white; font-weight: bold; margin-bottom: 10px; }
           a { display: block; text-align: center; margin-top: 30px; padding: 12px 24px; background: #3498db; color: white; text-decoration: none; border-radius: 8px; width: fit-content; margin-left: auto; margin-right: auto; }
           a:hover { background: #2980b9; }
         </style>
@@ -168,11 +391,11 @@ Complaint: "${message}"`;
         <div class="card">
           <h1>🎉 Complaint Registered Successfully!</h1>
           <p><strong>Ticket ID:</strong> ${ticket_id}</p>
-          <div class="priority-badge" style="background: ${classified.priority === 'High' ? '#e74c3c' : (classified.priority === 'Medium' ? '#f39c12' : '#27ae60')}">
+          <div class="priority-badge" style="background: ${priorityColor}">
             Priority: ${classified.priority}
           </div>
           <p><strong>Category:</strong> ${classified.category}</p>
-          <p><strong>Location:</strong> ${classified.location}</p>
+          <p><strong>Location:</strong> ${location}</p>
           <p><strong>Summary:</strong> ${classified.summary}</p>
 
           ${photoDataUrl ? `<img src="${photoDataUrl}" alt="Evidence" class="photo">` : '<p><em>No photo attached</em></p>'}
@@ -189,6 +412,7 @@ Complaint: "${message}"`;
           </div>
 
           <a href="/">Submit Another Complaint</a>
+          ${currentUser ? `<a href="/my-complaints" style="background:#f39c12; margin-top:10px;">View My Complaints</a>` : ''}
         </div>
       </body>
       </html>
@@ -204,48 +428,17 @@ Complaint: "${message}"`;
   }
 });
 
-// Department Login (Upgraded to beautiful UI)
+// Department Login
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
   if (username === 'admin' && password === 'city123') {
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Login Successful</title>
-        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 100vh; display: flex; justify-content: center; align-items: center; color: #333; }
-          .success-card { background: white; padding: 50px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); text-align: center; max-width: 450px; width: 90%; animation: slideUp 0.6s ease-out; }
-          @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-          .icon-circle { width: 80px; height: 80px; background: #27ae60; color: white; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 40px; margin: 0 auto 20px; animation: scaleIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.3s both; }
-          @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
-          h1 { color: #2d3436; margin-bottom: 10px; font-size: 24px; }
-          p { color: #636e72; margin-bottom: 30px; }
-          .btn-primary { display: inline-block; background: #3498db; color: white; padding: 14px 30px; border-radius: 50px; text-decoration: none; font-weight: 600; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3); }
-          .btn-primary:hover { transform: translateY(-3px); background: #2980b9; }
-        </style>
-      </head>
-      <body>
-        <div class="success-card">
-          <div class="icon-circle"><i class="fas fa-check"></i></div>
-          <h1>Login Successful!</h1>
-          <p>Welcome back, Department Official. Your dashboard is ready.</p>
-          <a href="/dashboard" class="btn-primary">Go to Dashboard <i class="fas fa-arrow-right" style="margin-left:8px;"></i></a>
-        </div>
-      </body>
-      </html>
-    `);
+    res.redirect('/dashboard');
   } else {
-    res.send("<h1 style='text-align:center; color:red;'>Invalid Credentials</h1><div style='text-align:center;'><a href='/'>Try Again</a></div>");
+    res.send("<h2 style='color:red; text-align:center;'>Invalid Credentials</h2><a href='/'>Try Again</a>");
   }
 });
 
-// Dashboard - (Preserved original card structure + Priority Badge + Map Link)
+// Dashboard
 app.get('/dashboard', async (req, res) => {
   try {
     const { data: tickets, error } = await supabase
@@ -268,10 +461,8 @@ app.get('/dashboard', async (req, res) => {
           ? `<div style="background:#e8f5e8; padding:10px; border-radius:8px; margin-top:10px;"><strong>AI Photo Analysis:</strong> ${ticket.photo_analysis}</div>`
           : '';
 
-        // Priority Badge Logic
         let priorityColor = ticket.priority === 'High' ? '#e74c3c' : (ticket.priority === 'Medium' ? '#f39c12' : '#27ae60');
 
-        // Progress bar logic
         let progressPercent = 0;
         let progressColor = '#e74c3c';
         if (ticket.status === 'In Progress') {
@@ -282,39 +473,28 @@ app.get('/dashboard', async (req, res) => {
           progressColor = '#27ae60';
         }
 
-        // Google Maps link
-        // FIXED: Using the standard Google Maps search URL format
-      const mapsLink = ticket.lat && ticket.lng 
-        ? `https://www.google.com/maps/search/?api=1&query=${ticket.lat},${ticket.lng}`
-        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ticket.location)}`;
-        
+        const mapsLink = ticket.lat && ticket.lng 
+          ? `https://www.google.com/maps/search/?api=1&query=${ticket.lat},${ticket.lng}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ticket.location)}`;
+
         ticketList += `
-          <div class="ticket-card" style="background:#f8f9fa; border-radius:15px; padding:25px; margin-bottom:30px; box-shadow:0 6px 20px rgba(0,0,0,0.08); text-align: left;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-              <h3 style="color:#2c3e50; margin: 0;">Ticket ID: ${ticket.ticket_id || 'N/A'}</h3>
-              <span style="background:${priorityColor}; color:white; padding:6px 15px; border-radius:50px; font-size:0.85em; font-weight:bold;">
-                Priority: ${ticket.priority}
-              </span>
+          <div style="background:#f8f9fa; border-radius:15px; padding:25px; margin-bottom:30px; box-shadow:0 6px 20px rgba(0,0,0,0.08);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+              <h3 style="color:#2c3e50; margin:0;">Ticket ID: ${ticket.ticket_id}</h3>
+              <span style="background:${priorityColor}; color:white; padding:6px 15px; border-radius:50px; font-weight:bold;">${ticket.priority} Priority</span>
             </div>
-
-            <p><strong>Status:</strong> <span style="font-weight:bold; color:${progressColor};">${ticket.status}</span></p>
+            <p><strong>Status:</strong> <span style="color:${progressColor}; font-weight:bold;">${ticket.status}</span></p>
             <p><strong>Category:</strong> ${ticket.category}</p>
-            
-            <div style="margin-bottom: 15px;">
-              <p><strong>Location:</strong> ${ticket.location}</p>
-              <a href="${mapsLink}" target="_blank" style="color:#3498db; text-decoration:none; font-weight:600; font-size: 0.9em;">
-                <i class="fas fa-map-marker-alt"></i> View on Google Maps →
-              </a>
-            </div>
-
+            <p><strong>Location:</strong> ${ticket.location} <a href="${mapsLink}" target="_blank" style="color:#3498db; text-decoration:none;">(View on Maps →)</a></p>
             <p><strong>Assigned Team:</strong> <strong>${ticket.assigned_team || '<em style="color:#999;">Not assigned yet</em>'}</strong></p>
             <p><strong>Submitted:</strong> ${new Date(ticket.created_at).toLocaleString()}</p>
 
             <div style="margin:20px 0;">
               <p><strong>Progress:</strong></p>
               <div style="width:100%; background:#ddd; border-radius:10px; overflow:hidden;">
-                <div style="width:${progressPercent}%; height:15px; background:${progressColor}; transition:width 0.8s ease;"></div>
+                <div style="width:${progressPercent}%; height:25px; background:${progressColor}; transition:width 0.8s ease;"></div>
               </div>
+              <p style="text-align:right; margin-top:5px; color:#555;">${progressPercent}% Complete</p>
             </div>
 
             <p><strong>Description:</strong><br>${ticket.citizen_message.replace(/\n/g, '<br>')}</p>
@@ -357,7 +537,7 @@ app.get('/dashboard', async (req, res) => {
         <style>
           body { font-family: 'Poppins', sans-serif; background: #f0f4f8; padding: 40px; }
           .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 20px; padding: 40px; box-shadow: 0 15px 40px rgba(0,0,0,0.1); }
-          h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
+          h1 { text-align: center; color: #2c3e50; }
           .logout { text-align: right; margin-bottom: 30px; }
           .logout a { background: #e74c3c; color: white; padding: 12px 24px; border-radius: 50px; text-decoration: none; }
         </style>
@@ -367,28 +547,45 @@ app.get('/dashboard', async (req, res) => {
           <div class="logout"><a href="/">Logout</a></div>
           <h1>Department Dashboard</h1>
           <p style="text-align:center; font-size:1.3em; color:#555; margin-bottom:40px;">Manage & Resolve Citizen Complaints</p>
-          <div class="tickets">${ticketList}</div>
+          <div>${ticketList}</div>
         </div>
       </body>
       </html>
     `);
-
-  } catch (err) { res.status(500).send("Error loading dashboard"); }
+  } catch (err) {
+    console.error("Dashboard error:", err);
+    res.send("<h2>Error loading dashboard</h2><a href='/'>Back</a>");
+  }
 });
 
-// Update ticket status and assigned team
+// Update ticket
 app.post('/update-ticket', async (req, res) => {
   const { ticket_id, status, assigned_team } = req.body;
   try {
-    await supabase.from('tickets').update({ status, assigned_team: assigned_team || null }).eq('ticket_id', ticket_id);
+    const { error } = await supabase
+      .from('tickets')
+      .update({ status, assigned_team: assigned_team || null })
+      .eq('ticket_id', ticket_id);
+
+    if (error) throw error;
     res.redirect('/dashboard');
-  } catch (err) { res.status(500).send("Update failed"); }
+  } catch (err) {
+    console.error("Update error:", err);
+    res.send("<h2>Update failed</h2><a href='/dashboard'>Back</a>");
+  }
 });
 
 // Ticket Status API
 app.get('/api/ticket-status', async (req, res) => {
   const ticketId = req.query.ticketId;
-  const { data, error } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
+  if (!ticketId) return res.json({ error: "No ticket ID" });
+
+  const { data, error } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('ticket_id', ticketId)
+    .single();
+
   if (error || !data) res.json({ error: "Not found" });
   else res.json(data);
 });
@@ -396,6 +593,6 @@ app.get('/api/ticket-status', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`-----------------------------------------`);
   console.log(`🚀 City AI Portal is LIVE`);
-  console.log(`🔗 Local Link: http://localhost:${PORT}`);
+  console.log(`🔗 Local: http://localhost:${PORT}`);
   console.log(`-----------------------------------------`);
 });
